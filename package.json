@@ -1,0 +1,29 @@
+{
+  "name": "@cuboapp/scheduler",
+  "version": "0.0.1",
+  "type": "module",
+  "private": false,
+  "license": "MIT",
+  "description": "NodeJS scheduler via node-cron",
+  "dependencies": {
+    "console-log-colors": "^0.3.3",
+    "node-cron": "^3.0.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cuboapp/scheduler.git"
+  },
+  "bin": {
+    "cubo_scheduler": "./src/run.js"
+  },
+  "main": "src/scheduler.js",
+  "scripts": {
+    "start": "SCHEDULER_DEBUG=1 SCHEDULER_DIR=./test/commands /usr/local/bin/node --experimental-fetch ./src/run.js"
+  },
+  "keywords": [
+    "cron",
+    "nodejs",
+    "js",
+    "scheduler"
+  ]
+}
