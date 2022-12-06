@@ -16,15 +16,17 @@ class Scheduler {
   #jobs = {}
   #timeouts = {}
 
+  #defaultTimeout = 10000
+
   constructor(commandsPath, debug = false) {
     this.#debug = debug
     this.#commandsDirectory = commandsPath
   }
 
-  async init(withSchedule = true) {
-    await this.#parseCommands(withSchedule)
+  async init(specificCommand = undefined) {
+    await this.#parseCommands(specificCommand)
 
-    if (withSchedule) {
+    if (!specificCommand) {
       this.watch()
     }
   }
@@ -39,7 +41,7 @@ class Scheduler {
     this.#ping = false
     this.#watcher = setInterval(() => {
       this.#ping = this.#ping === false ? true : false
-      this.#parseCommands(true)
+      this.#parseCommands()
     }, 5000)
   }
 
@@ -52,12 +54,14 @@ class Scheduler {
 
   /**
    * Execute command
-   * @param {string} command
-   * @param {number?} timeout
+   * @param { number } timeout
+   * @param { string } command
+   * @param { any } command
    */
-  exec(command, timeout = 10000, ...props) {
+  exec(command, timeout, props = {}) {
     return new Promise((resolve, reject) => {
       const ts = new Date()
+      const jobId = +ts
 
       if (!this.#commands[command]) {
         log('error', `Command "${command}" is not defined`)
@@ -65,20 +69,19 @@ class Scheduler {
       }
 
       if (!this.#locks[command]) {
-        const jobId = +ts
         this.#debug && log('info', `Command "${command}" #${jobId} started`)
 
         this.#jobs[command] = jobId
         this.#locks[command] = true
 
-        if (timeout !== 0) {
+        if (timeout !== undefined && timeout > 0) {
           this.#timeouts[command] = setTimeout(() => {
             this.#locks[command] = false
-            resolve(true)
+            reject(`Command "${command}" rejected by timeout`)
           }, timeout)
         }
 
-        this.#commands[command].handler(...props).finally(() => {
+        this.#commands[command].handler(props).finally(() => {
           if (this.#jobs[command] === jobId) {
             this.#debug && log('info', `Command "${command}" #${jobId} completed`)
 
@@ -89,16 +92,17 @@ class Scheduler {
           } else {
             log('error', `Command "${command}" #${jobId} completed with overcome`)
           }
+
           resolve(true)
         })
       } else {
-        this.#debug && log('warn', `Command "${command}" #${jobId} locked `)
-        reject(`Command "${command}" #${jobId} locked `)
+        // this.#debug && log('warn', `Command "${command}" #${jobId} locked `)
+        reject(`Command "${command}" locked`)
       }
     })
   }
 
-  async #parseCommands(withSchedule) {
+  async #parseCommands(specificCommand) {
     const files = await readFiles(this.#commandsDirectory)
     const dirs = files.filter(file => file.info.isDirectory())
 
@@ -111,8 +115,31 @@ class Scheduler {
       try {
         const info = await stat(commandFile)
 
-        if (!this.#commands[commandName] || this.#commands[commandName].version !== info.mtimeMs) {
-          const command = await import(commandFile + '?_=' + +new Date()).then(res => ({ handler: res.handler, schedule: res.schedule }))
+        const baseResolved = !this.#commands[commandName]
+        const versionResolved = !baseResolved && this.#commands[commandName].version !== info.mtimeMs
+        const specificResolved = specificCommand === undefined || commandName === specificCommand
+
+        if ((baseResolved || versionResolved) && specificResolved) {
+          const command = await import(commandFile + '?_=' + +new Date()).then(res => ({
+            handler: res.handler,
+            schedule: res.schedule,
+            timeout: res.timeout
+          }))
+
+          // timeout
+          let timeout = this.#defaultTimeout
+          if (command.timeout !== undefined && !isNaN(parseInt(command.timeout))) {
+            timeout = parseInt(command.timeout)
+          }
+
+          // handler
+          let handler = command.handler
+          if (!(handler instanceof Promise)) {
+            handler = async (props) => command.handler(props)
+          }
+
+          // version
+          let version = info.mtimeMs
 
           if (!command.handler) {
             throw new Error('handler for command ' + commandName + ' not defined')
@@ -120,21 +147,26 @@ class Scheduler {
 
           if (!this.#commands[commandName]) {
             this.#debug && log('success', `Command added: "${commandName}"`)
+
             this.#commands[commandName] = {
               name: commandName,
-              handler: command.handler,
-              version: info.mtimeMs,
+              handler,
+              timeout,
+              version,
               tasks: []
             }
           } else {
             this.#debug && log('warn', `Command updated: "${commandName}"`)
-            this.#commands[commandName].handler = command.handler
-            this.#commands[commandName].version = info.mtimeMs
+
+            const oldTimeout = this.#commands[commandName].timeout
+            this.#commands[commandName].handler = handler
+            this.#commands[commandName].version = version
+            this.#commands[commandName].timeout = timeout
 
             // clear old tasks
             if (Array.isArray(this.#commands[commandName].tasks)) {
               for (const task of this.#commands[commandName].tasks) {
-                this.#debug && log('warn', `Remove old "${commandName}" task with schedule "${task.schedule}"`)
+                log('warn', `Remove old "${commandName}" task with schedule "${task.schedule}" and timeout "${oldTimeout}"`)
 
                 task.job.stop()
               }
@@ -143,18 +175,20 @@ class Scheduler {
           }
 
           // init new schedule tasks
-          if (withSchedule && command.schedule) {
+          if (!specificCommand && command.schedule) {
             if (!Array.isArray(command.schedule)) {
               command.schedule = [command.schedule]
             }
 
             for (const cronExpression of command.schedule) {
-              this.#debug && log('warn', `Add new "${commandName}" task with schedule "${cronExpression}"`)
+              log('warn', `Add new "${commandName}" task with schedule "${cronExpression}" and timeout "${timeout}"`)
 
               this.#commands[commandName].tasks.push({
                 schedule: cronExpression,
                 job: cron.schedule(cronExpression, () => {
-                  this.exec(commandName)
+                  this.exec(commandName, this.#commands[commandName].timeout).catch(e => {
+                    this.#debug && log('error', e)
+                  })
                 })
               })
             }

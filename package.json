@@ -1,29 +1,39 @@
 {
   "name": "@cuboapp/scheduler",
   "version": "0.0.1",
+  "author": "Yaroslav Shelomentsev",
   "type": "module",
   "private": false,
   "license": "MIT",
   "description": "NodeJS scheduler via node-cron",
+  "main": "src/scheduler.js",
+  "scripts": {
+    "start": "/usr/local/bin/node --experimental-fetch ./src/run.js --debug --folder=./test/commands"
+  },
   "dependencies": {
     "console-log-colors": "^0.3.3",
-    "node-cron": "^3.0.2"
+    "node-cron": "^3.0.2",
+    "yargs": "^17.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^18.11.11",
+    "@types/yargs": "^17.0.16"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/cuboapp/scheduler.git"
+    "url": "git+https://github.com/cuboapp/scheduler.git"
   },
   "bin": {
-    "cubo_scheduler": "./src/run.js"
-  },
-  "main": "src/scheduler.js",
-  "scripts": {
-    "start": "SCHEDULER_DEBUG=1 SCHEDULER_DIR=./test/commands /usr/local/bin/node --experimental-fetch ./src/run.js"
+    "cubo_scheduler": "src/run.js"
   },
   "keywords": [
     "cron",
     "nodejs",
     "js",
     "scheduler"
-  ]
+  ],
+  "bugs": {
+    "url": "https://github.com/cuboapp/scheduler/issues"
+  },
+  "homepage": "https://github.com/cuboapp/scheduler#readme"
 }
