@@ -112,92 +112,99 @@ class Scheduler {
       const commandName = dir.name
       const commandFile = dir.filepath + '/index.js'
 
-      try {
-        const info = await stat(commandFile)
+      const specificResolved = specificCommand === undefined || commandName === specificCommand
 
-        const baseResolved = !this.#commands[commandName]
-        const versionResolved = !baseResolved && this.#commands[commandName].version !== info.mtimeMs
-        const specificResolved = specificCommand === undefined || commandName === specificCommand
+      if (specificResolved) {
+        try {
+          const info = await stat(commandFile)
 
-        if ((baseResolved || versionResolved) && specificResolved) {
-          const command = await import(commandFile + '?_=' + +new Date()).then(res => ({
-            handler: res.handler,
-            schedule: res.schedule,
-            timeout: res.timeout
-          }))
+          const baseResolved = !this.#commands[commandName]
+          const versionResolved = !baseResolved && this.#commands[commandName].version !== info.mtimeMs
 
-          // timeout
-          let timeout = this.#defaultTimeout
-          if (command.timeout !== undefined && !isNaN(parseInt(command.timeout))) {
-            timeout = parseInt(command.timeout)
-          }
+          if (baseResolved || versionResolved) {
+            const command = await import(commandFile + '?_=' + +new Date()).then(res => ({
+              handler: res.handler,
+              schedule: res.schedule,
+              timeout: res.timeout
+            }))
 
-          // handler
-          let handler = command.handler
-          if (!(handler instanceof Promise)) {
-            handler = async (props) => command.handler(props)
-          }
-
-          // version
-          let version = info.mtimeMs
-
-          if (!command.handler) {
-            throw new Error('handler for command ' + commandName + ' not defined')
-          }
-
-          if (!this.#commands[commandName]) {
-            this.#debug && log('success', `Command added: "${commandName}"`)
-
-            this.#commands[commandName] = {
-              name: commandName,
-              handler,
-              timeout,
-              version,
-              tasks: []
+            // timeout
+            let timeout = this.#defaultTimeout
+            if (command.timeout !== undefined && !isNaN(parseInt(command.timeout))) {
+              timeout = parseInt(command.timeout)
             }
-          } else {
-            this.#debug && log('warn', `Command updated: "${commandName}"`)
 
-            const oldTimeout = this.#commands[commandName].timeout
-            this.#commands[commandName].handler = handler
-            this.#commands[commandName].version = version
-            this.#commands[commandName].timeout = timeout
+            // handler
+            let handler = command.handler
+            if (!(handler instanceof Promise)) {
+              handler = async props => command.handler(props)
+            }
 
-            // clear old tasks
-            if (Array.isArray(this.#commands[commandName].tasks)) {
-              for (const task of this.#commands[commandName].tasks) {
-                log('warn', `Remove old "${commandName}" task with schedule "${task.schedule}" and timeout "${oldTimeout}"`)
+            // version
+            let version = info.mtimeMs
 
-                task.job.stop()
+            if (!command.handler) {
+              throw new Error('handler for command ' + commandName + ' not defined')
+            }
+
+            if (!this.#commands[commandName]) {
+              this.#debug && log('success', `Command added: "${commandName}"`)
+
+              this.#commands[commandName] = {
+                name: commandName,
+                handler,
+                timeout,
+                version,
+                tasks: []
               }
+            } else {
+              this.#debug && log('warn', `Command updated: "${commandName}"`)
+
+              const oldTimeout = this.#commands[commandName].timeout
+              this.#commands[commandName].handler = handler
+              this.#commands[commandName].version = version
+              this.#commands[commandName].timeout = timeout
+
+              // clear old tasks
+              if (Array.isArray(this.#commands[commandName].tasks)) {
+                for (const task of this.#commands[commandName].tasks) {
+                  log('warn', `Remove old "${commandName}" task with schedule "${task.schedule}" and timeout "${oldTimeout}"`)
+
+                  task.job.stop()
+                }
+              }
+              this.#commands[commandName].tasks = []
             }
-            this.#commands[commandName].tasks = []
-          }
 
-          // init new schedule tasks
-          if (!specificCommand && command.schedule) {
-            if (!Array.isArray(command.schedule)) {
-              command.schedule = [command.schedule]
-            }
+            // init new schedule tasks
+            if (!specificCommand && command.schedule) {
+              if (!Array.isArray(command.schedule)) {
+                command.schedule = [command.schedule]
+              }
 
-            for (const cronExpression of command.schedule) {
-              log('warn', `Add new "${commandName}" task with schedule "${cronExpression}" and timeout "${timeout}"`)
+              for (const cronExpression of command.schedule) {
+                log('warn', `Add new "${commandName}" task with schedule "${cronExpression}" and timeout "${timeout}"`)
 
-              this.#commands[commandName].tasks.push({
-                schedule: cronExpression,
-                job: cron.schedule(cronExpression, () => {
-                  this.exec(commandName, this.#commands[commandName].timeout).catch(e => {
-                    this.#debug && log('error', e)
+                this.#commands[commandName].tasks.push({
+                  schedule: cronExpression,
+                  job: cron.schedule(cronExpression, () => {
+                    this.exec(commandName, this.#commands[commandName].timeout).catch(e => {
+                      this.#debug && log('error', e)
+                    })
                   })
                 })
-              })
+              }
             }
           }
-        }
 
-        updated.push(commandName)
-      } catch (e) {
-        log('error', `Command "${commandName}" import failed: ${e.code || e.message}`)
+          updated.push(commandName)
+        } catch (e) {
+          log('error', `Command "${commandName}" import failed: ${e.code || e.message}`)
+
+          if (this.#debug) {
+            console.log(e)
+          }
+        }
       }
     }
 
